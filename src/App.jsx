@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import api from './api/client';
 import {
     Scissors,
@@ -12,18 +12,37 @@ import {
     X,
     Printer,
     Check,
-    Loader2
+    Loader2,
+    FileSpreadsheet
 } from 'lucide-react';
 
 export default function App() {
     const empresaId = 1;
 
+    // Estados de datos generales con valores por defecto seguros
     const [dashboard, setDashboard] = useState(null);
+    const [fichas, setFichas] = useState([]);
+    const [fichaSeleccionadaId, setFichaSeleccionadaId] = useState(1);
     const [costoData, setCostoData] = useState(null);
     const [precioVentaSimulado, setPrecioVentaSimulado] = useState(45000);
     const [errorBackend, setErrorBackend] = useState(null);
 
-    // Estados de modal y entrega con selección de taller y ficha
+    // Estados del modal de Nueva Ficha Técnica
+    const [modalFichaAbierto, setModalFichaAbierto] = useState(false);
+    const [modalFichaCargando, setModalFichaCargando] = useState(false);
+    const [modalFichaError, setModalFichaError] = useState(null);
+    const [modalFichaExito, setModalFichaExito] = useState(null);
+    const [insumosDisponibles, setInsumosDisponibles] = useState([]);
+    const [formFicha, setFormFicha] = useState({
+        referencia: '',
+        descripcion: '',
+        tallas: '28,30,32,34',
+        insumoId: '',
+        cantidadNecesaria: '1.20',
+        porcentajeMerma: '5.0'
+    });
+
+    // Estados del modal de Entrega Satélite
     const [modalAbierto, setModalAbierto] = useState(false);
     const [modalCargando, setModalCargando] = useState(false);
     const [modalError, setModalError] = useState(null);
@@ -36,7 +55,7 @@ export default function App() {
         fecha: new Date().toISOString().split('T')[0]
     });
 
-    // Estados del corte de satélite
+    // Estados de Liquidación de Satélite
     const [sateliteLiquidacionId, setSateliteLiquidacionId] = useState('1');
     const [fechaInicio, setFechaInicio] = useState('2026-11-01');
     const [fechaFin, setFechaFin] = useState('2026-11-15');
@@ -45,10 +64,12 @@ export default function App() {
     const [liqError, setLiqError] = useState(null);
     const [comprobante, setComprobante] = useState(null);
 
-    const cargarDatos = useCallback(async () => {
+    // Función única de carga de datos sin dependencias cruzadas
+    const cargarTodo = async (idFichaActual = fichaSeleccionadaId, precio = precioVentaSimulado) => {
         try {
             setErrorBackend(null);
 
+            // 1. Dashboard
             try {
                 const resDash = await api.get(`/dashboard/taller/${empresaId}`);
                 setDashboard(resDash.data);
@@ -56,32 +77,113 @@ export default function App() {
                 console.warn("Aviso en Dashboard:", e);
             }
 
+            // 2. Fichas
             try {
-                const resCosto = await api.get(`/fichas/1/resumen-costos?precioVenta=${precioVentaSimulado}`);
-                setCostoData(resCosto.data);
+                const resFichas = await api.get(`/fichas/empresa/${empresaId}`);
+                if (Array.isArray(resFichas.data)) {
+                    setFichas(resFichas.data);
+                }
             } catch (e) {
-                console.warn("Aviso en Costos:", e);
+                console.warn("Aviso en Fichas:", e);
             }
-        } catch (err) {
-            console.error(err);
-            setErrorBackend("No se pudo conectar con el servidor Spring Boot (puerto 8080).");
-        }
-    }, [empresaId, precioVentaSimulado]);
 
-    useEffect(() => {
-        cargarDatos();
-    }, [cargarDatos]);
+            // 3. Insumos
+            try {
+                const resInsumos = await api.get(`/insumos/empresa/${empresaId}`);
+                if (Array.isArray(resInsumos.data)) {
+                    setInsumosDisponibles(resInsumos.data);
+                    const tela = resInsumos.data.find(i => i.tipoInsumo === 'TELA') || resInsumos.data[0];
+                    if (tela) {
+                        setFormFicha(prev => ({ ...prev, insumoId: tela.id }));
+                    }
+                }
+            } catch (e) {
+                console.warn("Aviso en Insumos:", e);
+            }
 
-    const recalcularMargen = async (nuevoPrecio) => {
-        setPrecioVentaSimulado(nuevoPrecio);
-        try {
-            const res = await api.get(`/fichas/1/resumen-costos?precioVenta=${nuevoPrecio}`);
-            setCostoData(res.data);
+            // 4. Costos de la prenda actual
+            if (idFichaActual) {
+                try {
+                    const resCosto = await api.get(`/fichas/${idFichaActual}/resumen-costos?precioVenta=${precio}`);
+                    setCostoData(resCosto.data);
+                } catch (e) {
+                    console.warn("Aviso en Costos:", e);
+                }
+            }
+
         } catch (err) {
-            console.error(err);
+            console.error("Error global de conexión:", err);
+            setErrorBackend("No se pudo conectar con el servidor Spring Boot.");
         }
     };
 
+    // Se ejecuta estrictamente una vez al inicio
+    useEffect(() => {
+        cargarTodo(1, 45000);
+    }, []);
+
+    // Cambio manual de ficha en el selector
+    const handleCambiarFicha = (id) => {
+        const numId = Number(id);
+        setFichaSeleccionadaId(numId);
+        cargarTodo(numId, precioVentaSimulado);
+    };
+
+    // Recalcular simulación de precio
+    const recalcularMargen = (nuevoPrecio) => {
+        setPrecioVentaSimulado(nuevoPrecio);
+        cargarTodo(fichaSeleccionadaId, nuevoPrecio);
+    };
+
+    // Guardar nueva ficha técnica
+    const guardarFichaTecnica = async (e) => {
+        e.preventDefault();
+        setModalFichaCargando(true);
+        setModalFichaError(null);
+        setModalFichaExito(null);
+
+        const idInsumoElegido = formFicha.insumoId || (insumosDisponibles[0]?.id ?? 2);
+
+        const payload = {
+            referencia: formFicha.referencia.toUpperCase().trim(),
+            descripcion: formFicha.descripcion,
+            tallas: formFicha.tallas,
+            insumos: [
+                {
+                    insumoId: Number(idInsumoElegido),
+                    cantidadNecesaria: Number(formFicha.cantidadNecesaria),
+                    porcentajeMerma: Number(formFicha.porcentajeMerma)
+                }
+            ]
+        };
+
+        try {
+            const res = await api.post(`/fichas/empresa/${empresaId}`, payload);
+            setModalFichaExito(`¡Referencia ${res.data.referencia} creada con éxito!`);
+
+            const nuevoId = res.data.id;
+            setFichaSeleccionadaId(nuevoId);
+            await cargarTodo(nuevoId, precioVentaSimulado);
+
+            setTimeout(() => {
+                setModalFichaExito(null);
+                setFormFicha(prev => ({
+                    ...prev,
+                    referencia: '',
+                    descripcion: ''
+                }));
+                setModalFichaAbierto(false);
+            }, 1000);
+
+        } catch (err) {
+            console.error(err);
+            setModalFichaError(err.response?.data?.mensaje || "Error al crear la ficha técnica.");
+        } finally {
+            setModalFichaCargando(false);
+        }
+    };
+
+    // Guardar entrega de satélite
     const guardarEntrega = async (e) => {
         e.preventDefault();
         if (!formEntrega.cantidad || Number(formEntrega.cantidad) <= 0) {
@@ -98,13 +200,13 @@ export default function App() {
                 `/satelites/entregas/taller/${empresaId}/satelite/${formEntrega.sateliteId}/ficha/${formEntrega.fichaId}?cantidad=${formEntrega.cantidad}&precioPorPrenda=${formEntrega.precioPorPrenda}&fecha=${formEntrega.fecha}`
             );
             setModalExito(`Lote de ${formEntrega.cantidad} prendas registrado correctamente.`);
-            cargarDatos();
+            cargarTodo();
 
             setTimeout(() => {
                 setModalExito(null);
                 setFormEntrega(prev => ({ ...prev, cantidad: '' }));
                 setModalAbierto(false);
-            }, 1200);
+            }, 1000);
         } catch (err) {
             setModalError(err.response?.data?.mensaje || "Error al registrar la entrega.");
         } finally {
@@ -112,6 +214,7 @@ export default function App() {
         }
     };
 
+    // Liquidar período de satélite
     const liquidarPeriodo = async () => {
         setLiqCargando(true);
         setLiqError(null);
@@ -119,13 +222,18 @@ export default function App() {
             const url = `/satelites/liquidar/taller/${empresaId}/satelite/${sateliteLiquidacionId}?fechaInicio=${fechaInicio}&fechaFin=${fechaFin}&retenciones=${retenciones}&observaciones=${encodeURIComponent('Corte de maquila semanal')}`;
             const res = await api.post(url);
             setComprobante(res.data);
-            cargarDatos();
+            cargarTodo();
         } catch (err) {
             setLiqError(err.response?.data?.mensaje || "No hay entregas pendientes de liquidar para este satélite en el periodo indicado.");
         } finally {
             setLiqCargando(false);
         }
     };
+
+    // Filtro seguro de telas
+    const telasDisponibles = Array.isArray(insumosDisponibles)
+        ? insumosDisponibles.filter(ins => ins && ins.tipoInsumo === 'TELA')
+        : [];
 
     return (
         <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-800">
@@ -138,7 +246,7 @@ export default function App() {
                 </div>
                 <div className="flex items-center space-x-4">
                     <button
-                        onClick={() => cargarDatos()}
+                        onClick={() => cargarTodo()}
                         className="flex items-center gap-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-700 transition"
                     >
                         <RefreshCw className="h-3.5 w-3.5" /> Actualizar
@@ -206,17 +314,40 @@ export default function App() {
                     </div>
                 </section>
 
-                {/* Panel de Costeo */}
+                {/* Panel de Costeo con Selector Dinámico */}
                 <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                     <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-50/50">
-                        <div>
-              <span className="text-xs font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-md">
+                        <div className="flex flex-col md:flex-row md:items-center gap-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-md w-max">
                 Motor de Costeo Técnico
               </span>
-                            <h2 className="text-lg font-bold text-slate-800 mt-2">
-                                Referencia: <span className="text-indigo-600">{costoData?.referencia || 'JEAN-REF-001'}</span>
-                            </h2>
+
+                            <div className="flex items-center gap-2">
+                                <select
+                                    value={fichaSeleccionadaId}
+                                    onChange={(e) => handleCambiarFicha(e.target.value)}
+                                    className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                >
+                                    {Array.isArray(fichas) && fichas.length > 0 ? (
+                                        fichas.map((f) => (
+                                            <option key={f.id} value={f.id}>
+                                                {f.referencia} — {f.descripcion}
+                                            </option>
+                                        ))
+                                    ) : (
+                                        <option value="1">JEAN-REF-001 (Pantalón)</option>
+                                    )}
+                                </select>
+
+                                <button
+                                    onClick={() => setModalFichaAbierto(true)}
+                                    className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold border border-indigo-200 transition"
+                                >
+                                    <Plus className="h-3.5 w-3.5" /> Nueva Prenda
+                                </button>
+                            </div>
                         </div>
+
                         <div className="flex items-center gap-3">
                             <label className="text-sm font-medium text-slate-600">Simular Precio Venta ($):</label>
                             <input
@@ -233,11 +364,11 @@ export default function App() {
                             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Telas y Merma</h3>
                             <div className="flex justify-between text-sm">
                                 <span className="text-slate-600">Consumo tela (+ merma):</span>
-                                <span className="font-semibold">{costoData?.consumoTelaPorPrenda ?? 1.37} m</span>
+                                <span className="font-semibold">{costoData?.consumoTelaPorPrenda ?? 0} m</span>
                             </div>
                             <div className="flex justify-between text-sm">
                                 <span className="text-slate-600">Costo total tela:</span>
-                                <span className="font-semibold">${Number(costoData?.costoTelas ?? 19110).toLocaleString('es-CO')}</span>
+                                <span className="font-semibold">${Number(costoData?.costoTelas ?? 0).toLocaleString('es-CO')}</span>
                             </div>
                             <div className="flex justify-between text-sm">
                                 <span className="text-slate-600">Avíos e insumos menores:</span>
@@ -249,32 +380,32 @@ export default function App() {
                             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Procesos & Confección</h3>
                             <div className="flex justify-between text-sm">
                                 <span className="text-slate-600">Bordado / Estampado:</span>
-                                <span className="font-semibold text-indigo-600">${Number(costoData?.costoEstampadoBordadoLavanderia ?? 1500).toLocaleString('es-CO')}</span>
+                                <span className="font-semibold text-indigo-600">${Number(costoData?.costoEstampadoBordadoLavanderia ?? 0).toLocaleString('es-CO')}</span>
                             </div>
                             <div className="flex justify-between text-sm">
                                 <span className="text-slate-600">Mano de obra ensamble:</span>
-                                <span className="font-semibold">${Number(costoData?.costoManoObraDirecta ?? 1200).toLocaleString('es-CO')}</span>
+                                <span className="font-semibold">${Number(costoData?.costoManoObraDirecta ?? 0).toLocaleString('es-CO')}</span>
                             </div>
                             <div className="border-t border-slate-100 pt-2 flex justify-between text-sm font-bold">
                                 <span>Costo Unitario Fabricación:</span>
-                                <span className="text-slate-900">${Number(costoData?.costoTotalProduccion ?? 21810).toLocaleString('es-CO')}</span>
+                                <span className="text-slate-900">${Number(costoData?.costoTotalProduccion ?? 0).toLocaleString('es-CO')}</span>
                             </div>
                         </div>
 
                         <div className="p-6 space-y-3 bg-slate-50/50">
                             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Utilidad y Margen</h3>
                             <div className="flex justify-between text-sm">
-                                <span className="text-slate-600">Ganancia por jean:</span>
-                                <span className="font-bold text-emerald-600">${Number(costoData?.margenBruto ?? 23190).toLocaleString('es-CO')}</span>
+                                <span className="text-slate-600">Ganancia por unidad:</span>
+                                <span className="font-bold text-emerald-600">${Number(costoData?.margenBruto ?? 0).toLocaleString('es-CO')}</span>
                             </div>
                             <div className="flex justify-between items-baseline pt-1">
                                 <span className="text-sm font-medium text-slate-600">Margen Comercial:</span>
-                                <span className="text-3xl font-extrabold text-emerald-600">{costoData?.porcentajeMargen ?? 51.53}%</span>
+                                <span className="text-3xl font-extrabold text-emerald-600">{costoData?.porcentajeMargen ?? 0}%</span>
                             </div>
                             <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden mt-1">
                                 <div
-                                    className="bg-emerald-500 h-2 rounded-full"
-                                    style={{ width: `${Math.min(costoData?.porcentajeMargen ?? 51.53, 100)}%` }}
+                                    className="bg-emerald-500 h-2 rounded-full transition-all duration-300"
+                                    style={{ width: `${Math.min(costoData?.porcentajeMargen ?? 0, 100)}%` }}
                                 ></div>
                             </div>
                         </div>
@@ -407,7 +538,147 @@ export default function App() {
 
             </main>
 
-            {/* Modal Emergente con Selector de Taller Satélite y Referencia */}
+            {/* Modal: Crear Nueva Ficha Técnica */}
+            {modalFichaAbierto && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden">
+                        <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                            <div>
+                                <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                                    <FileSpreadsheet className="h-5 w-5 text-indigo-600" />
+                                    Nueva Ficha Técnica de Prenda
+                                </h3>
+                                <p className="text-xs text-slate-500">Define los parámetros de costeo técnico</p>
+                            </div>
+                            <button
+                                onClick={() => setModalFichaAbierto(false)}
+                                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <form onSubmit={guardarFichaTecnica} className="p-6 space-y-4">
+                            {modalFichaError && (
+                                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
+                                    {modalFichaError}
+                                </div>
+                            )}
+                            {modalFichaExito && (
+                                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-xs">
+                                    {modalFichaExito}
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Referencia / Código</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Ej: CAMISA-002"
+                                        value={formFicha.referencia}
+                                        onChange={(e) => setFormFicha({ ...formFicha, referencia: e.target.value })}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Tallas Disponibles</label>
+                                    <input
+                                        type="text"
+                                        placeholder="S,M,L,XL o 28,30,32"
+                                        value={formFicha.tallas}
+                                        onChange={(e) => setFormFicha({ ...formFicha, tallas: e.target.value })}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                        required
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Descripción de la Prenda</label>
+                                <input
+                                    type="text"
+                                    placeholder="Ej: Camisa casual manga corta"
+                                    value={formFicha.descripcion}
+                                    onChange={(e) => setFormFicha({ ...formFicha, descripcion: e.target.value })}
+                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                    required
+                                />
+                            </div>
+
+                            {/* Insumo Principal y Consumos */}
+                            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Insumo Principal (Tela Base)</span>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Tela</label>
+                                    <select
+                                        value={formFicha.insumoId}
+                                        onChange={(e) => setFormFicha({ ...formFicha, insumoId: e.target.value })}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                        required
+                                    >
+                                        {telasDisponibles.length > 0 ? (
+                                            telasDisponibles.map((ins) => (
+                                                <option key={ins.id} value={ins.id}>
+                                                    {ins.nombre} (${Number(ins.costoUnitario).toLocaleString('es-CO')} / {ins.unidadMedida})
+                                                </option>
+                                            ))
+                                        ) : (
+                                            <option value="2">Tela Denim Rigido 12oz ($14.000 / METROS)</option>
+                                        )}
+                                    </select>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Metros x Prenda</label>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            value={formFicha.cantidadNecesaria}
+                                            onChange={(e) => setFormFicha({ ...formFicha, cantidadNecesaria: e.target.value })}
+                                            className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                            required
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Merma Técnica (%)</label>
+                                        <input
+                                            type="number"
+                                            step="0.1"
+                                            value={formFicha.porcentajeMerma}
+                                            onChange={(e) => setFormFicha({ ...formFicha, porcentajeMerma: e.target.value })}
+                                            className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                            required
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="pt-2 flex justify-end gap-3 border-t border-slate-100">
+                                <button
+                                    type="button"
+                                    onClick={() => setModalFichaAbierto(false)}
+                                    className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={modalFichaCargando}
+                                    className="px-5 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg flex items-center gap-2 shadow-sm transition disabled:opacity-50"
+                                >
+                                    {modalFichaCargando && <Loader2 className="h-4 w-4 animate-spin" />}
+                                    {modalFichaCargando ? 'Guardando...' : 'Crear Ficha Técnica'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal: Entrega Satélite */}
             {modalAbierto && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
                     <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden">
@@ -436,7 +707,6 @@ export default function App() {
                                 </div>
                             )}
 
-                            {/* Fila: Selector de Taller y Ficha Técnica */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Taller Satélite</label>
@@ -456,12 +726,19 @@ export default function App() {
                                         onChange={(e) => setFormEntrega({ ...formEntrega, fichaId: e.target.value })}
                                         className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                                     >
-                                        <option value="1">JEAN-REF-001 (Pantalón)</option>
+                                        {Array.isArray(fichas) && fichas.length > 0 ? (
+                                            fichas.map((f) => (
+                                                <option key={f.id} value={f.id}>
+                                                    {f.referencia}
+                                                </option>
+                                            ))
+                                        ) : (
+                                            <option value="1">JEAN-REF-001</option>
+                                        )}
                                     </select>
                                 </div>
                             </div>
 
-                            {/* Fila: Cantidad y Tarifa */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Cantidad de Prendas</label>
@@ -488,7 +765,6 @@ export default function App() {
                                 </div>
                             </div>
 
-                            {/* Fecha de Recepción */}
                             <div>
                                 <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Fecha de Recepción</label>
                                 <input
@@ -500,7 +776,6 @@ export default function App() {
                                 />
                             </div>
 
-                            {/* Cálculo previo */}
                             {Number(formEntrega.cantidad) > 0 && (
                                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 flex justify-between items-center text-xs">
                                     <span className="text-slate-600">Total a Pagar por Lote:</span>
