@@ -13,21 +13,24 @@ import {
     Printer,
     Check,
     Loader2,
-    FileSpreadsheet
+    FileSpreadsheet,
+    ClipboardList,
+    Calendar
 } from 'lucide-react';
 
 export default function App() {
     const empresaId = 1;
 
-    // Estados de datos generales con valores por defecto seguros
+    // Estados generales
     const [dashboard, setDashboard] = useState(null);
     const [fichas, setFichas] = useState([]);
+    const [ordenes, setOrdenes] = useState([]);
     const [fichaSeleccionadaId, setFichaSeleccionadaId] = useState(1);
     const [costoData, setCostoData] = useState(null);
     const [precioVentaSimulado, setPrecioVentaSimulado] = useState(45000);
     const [errorBackend, setErrorBackend] = useState(null);
 
-    // Estados del modal de Nueva Ficha Técnica
+    // Modal: Nueva Ficha Técnica
     const [modalFichaAbierto, setModalFichaAbierto] = useState(false);
     const [modalFichaCargando, setModalFichaCargando] = useState(false);
     const [modalFichaError, setModalFichaError] = useState(null);
@@ -42,20 +45,34 @@ export default function App() {
         porcentajeMerma: '5.0'
     });
 
-    // Estados del modal de Entrega Satélite
+    // Modal: Nueva Orden de Producción
+    const [modalOrdenAbierto, setModalOrdenAbierto] = useState(false);
+    const [modalOrdenCargando, setModalOrdenCargando] = useState(false);
+    const [modalOrdenError, setModalOrdenError] = useState(null);
+    const [modalOrdenExito, setModalOrdenExito] = useState(null);
+    const [formOrden, setFormOrden] = useState({
+        numeroOrden: `OP-${new Date().getFullYear()}-002`,
+        fichaTecnicaId: '1',
+        cantidadProgramada: '300',
+        cantidadCortada: '300',
+        fechaInicio: new Date().toISOString().split('T')[0],
+        fechaEntregaEstimada: ''
+    });
+
+    // Modal: Entrega Satélite (Estado único y unificado)
     const [modalAbierto, setModalAbierto] = useState(false);
     const [modalCargando, setModalCargando] = useState(false);
     const [modalError, setModalError] = useState(null);
     const [modalExito, setModalExito] = useState(null);
     const [formEntrega, setFormEntrega] = useState({
         sateliteId: '1',
-        fichaId: '1',
+        ordenId: '',
         cantidad: '',
         precioPorPrenda: '3200',
         fecha: new Date().toISOString().split('T')[0]
     });
 
-    // Estados de Liquidación de Satélite
+    // Liquidación Satélite
     const [sateliteLiquidacionId, setSateliteLiquidacionId] = useState('1');
     const [fechaInicio, setFechaInicio] = useState('2026-11-01');
     const [fechaFin, setFechaFin] = useState('2026-11-15');
@@ -64,7 +81,7 @@ export default function App() {
     const [liqError, setLiqError] = useState(null);
     const [comprobante, setComprobante] = useState(null);
 
-    // Función única de carga de datos sin dependencias cruzadas
+    // Carga integral de datos
     const cargarTodo = async (idFichaActual = fichaSeleccionadaId, precio = precioVentaSimulado) => {
         try {
             setErrorBackend(null);
@@ -77,7 +94,7 @@ export default function App() {
                 console.warn("Aviso en Dashboard:", e);
             }
 
-            // 2. Fichas
+            // 2. Fichas Técnicas
             try {
                 const resFichas = await api.get(`/fichas/empresa/${empresaId}`);
                 if (Array.isArray(resFichas.data)) {
@@ -87,7 +104,20 @@ export default function App() {
                 console.warn("Aviso en Fichas:", e);
             }
 
-            // 3. Insumos
+            // 3. Órdenes de Producción
+            try {
+                const resOrd = await api.get(`/ordenes/empresa/${empresaId}`);
+                if (Array.isArray(resOrd.data)) {
+                    setOrdenes(resOrd.data);
+                    if (resOrd.data.length > 0) {
+                        setFormEntrega(prev => ({ ...prev, ordenId: prev.ordenId || String(resOrd.data[0].id) }));
+                    }
+                }
+            } catch (e) {
+                console.warn("Aviso en Órdenes:", e);
+            }
+
+            // 4. Insumos
             try {
                 const resInsumos = await api.get(`/insumos/empresa/${empresaId}`);
                 if (Array.isArray(resInsumos.data)) {
@@ -101,7 +131,7 @@ export default function App() {
                 console.warn("Aviso en Insumos:", e);
             }
 
-            // 4. Costos de la prenda actual
+            // 5. Costos de la Ficha Técnica actual
             if (idFichaActual) {
                 try {
                     const resCosto = await api.get(`/fichas/${idFichaActual}/resumen-costos?precioVenta=${precio}`);
@@ -117,25 +147,22 @@ export default function App() {
         }
     };
 
-    // Se ejecuta estrictamente una vez al inicio
     useEffect(() => {
         cargarTodo(1, 45000);
     }, []);
 
-    // Cambio manual de ficha en el selector
     const handleCambiarFicha = (id) => {
         const numId = Number(id);
         setFichaSeleccionadaId(numId);
         cargarTodo(numId, precioVentaSimulado);
     };
 
-    // Recalcular simulación de precio
     const recalcularMargen = (nuevoPrecio) => {
         setPrecioVentaSimulado(nuevoPrecio);
         cargarTodo(fichaSeleccionadaId, nuevoPrecio);
     };
 
-    // Guardar nueva ficha técnica
+    // Guardar Ficha Técnica
     const guardarFichaTecnica = async (e) => {
         e.preventDefault();
         setModalFichaCargando(true);
@@ -167,11 +194,7 @@ export default function App() {
 
             setTimeout(() => {
                 setModalFichaExito(null);
-                setFormFicha(prev => ({
-                    ...prev,
-                    referencia: '',
-                    descripcion: ''
-                }));
+                setFormFicha(prev => ({ ...prev, referencia: '', descripcion: '' }));
                 setModalFichaAbierto(false);
             }, 1000);
 
@@ -183,7 +206,48 @@ export default function App() {
         }
     };
 
-    // Guardar entrega de satélite
+    // Guardar Orden de Producción
+    const guardarOrdenProduccion = async (e) => {
+        e.preventDefault();
+        setModalOrdenCargando(true);
+        setModalOrdenError(null);
+        setModalOrdenExito(null);
+
+        const payload = {
+            numeroOrden: formOrden.numeroOrden.trim(),
+            fichaTecnicaId: Number(formOrden.fichaTecnicaId || (fichas[0]?.id ?? 1)),
+            cantidadProgramada: Number(formOrden.cantidadProgramada),
+            cantidadCortada: Number(formOrden.cantidadCortada),
+            fechaInicio: formOrden.fechaInicio,
+            fechaEntregaEstimada: formOrden.fechaEntregaEstimada || null
+        };
+
+        try {
+            const res = await api.post(`/ordenes/empresa/${empresaId}`, payload);
+            setModalOrdenExito(`¡Orden ${res.data.numeroOrden} creada con éxito!`);
+            await cargarTodo();
+
+            setTimeout(() => {
+                setModalOrdenExito(null);
+                setFormOrden({
+                    numeroOrden: `OP-${new Date().getFullYear()}-00${ordenes.length + 2}`,
+                    fichaTecnicaId: fichas[0]?.id || '1',
+                    cantidadProgramada: '300',
+                    cantidadCortada: '300',
+                    fechaInicio: new Date().toISOString().split('T')[0],
+                    fechaEntregaEstimada: ''
+                });
+                setModalOrdenAbierto(false);
+            }, 1000);
+        } catch (err) {
+            console.error(err);
+            setModalOrdenError(err.response?.data?.mensaje || "Error al registrar la orden de producción.");
+        } finally {
+            setModalOrdenCargando(false);
+        }
+    };
+
+    // Guardar Entrega de Satélite
     const guardarEntrega = async (e) => {
         e.preventDefault();
         if (!formEntrega.cantidad || Number(formEntrega.cantidad) <= 0) {
@@ -191,15 +255,17 @@ export default function App() {
             return;
         }
 
+        const idOrden = formEntrega.ordenId || (ordenes[0]?.id ?? 1);
+
         setModalCargando(true);
         setModalError(null);
         setModalExito(null);
 
         try {
             await api.post(
-                `/satelites/entregas/taller/${empresaId}/satelite/${formEntrega.sateliteId}/ficha/${formEntrega.fichaId}?cantidad=${formEntrega.cantidad}&precioPorPrenda=${formEntrega.precioPorPrenda}&fecha=${formEntrega.fecha}`
+                `/satelites/entregas/taller/${empresaId}/satelite/${formEntrega.sateliteId}/orden/${idOrden}?cantidad=${formEntrega.cantidad}&precioPorPrenda=${formEntrega.precioPorPrenda}&fecha=${formEntrega.fecha}`
             );
-            setModalExito(`Lote de ${formEntrega.cantidad} prendas registrado correctamente.`);
+            setModalExito(`Lote de ${formEntrega.cantidad} prendas registrado correctamente para la orden.`);
             cargarTodo();
 
             setTimeout(() => {
@@ -214,7 +280,7 @@ export default function App() {
         }
     };
 
-    // Liquidar período de satélite
+    // Liquidar período
     const liquidarPeriodo = async () => {
         setLiqCargando(true);
         setLiqError(null);
@@ -230,7 +296,6 @@ export default function App() {
         }
     };
 
-    // Filtro seguro de telas
     const telasDisponibles = Array.isArray(insumosDisponibles)
         ? insumosDisponibles.filter(ins => ins && ins.tipoInsumo === 'TELA')
         : [];
@@ -238,7 +303,7 @@ export default function App() {
     return (
         <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-800">
 
-            {/* Barra de Navegación */}
+            {/* Header */}
             <header className="bg-slate-900 text-white border-b border-slate-800 px-8 py-4 flex justify-between items-center shadow-sm">
                 <div className="flex items-center space-x-3">
                     <Scissors className="h-6 w-6 text-indigo-400" />
@@ -252,12 +317,12 @@ export default function App() {
                         <RefreshCw className="h-3.5 w-3.5" /> Actualizar
                     </button>
                     <span className="text-sm bg-indigo-950 text-indigo-300 border border-indigo-800 px-3 py-1 rounded-full font-medium">
-            Confecciones El Búcaro
-          </span>
+                        Confecciones El Búcaro
+                    </span>
                 </div>
             </header>
 
-            {/* Contenedor Principal */}
+            {/* Main */}
             <main className="flex-1 max-w-7xl w-full mx-auto p-6 md:p-8 space-y-6">
 
                 {errorBackend && (
@@ -267,12 +332,12 @@ export default function App() {
                     </div>
                 )}
 
-                {/* Tarjetas Superiores */}
+                {/* Tarjetas KPI */}
                 <section className="grid grid-cols-1 md:grid-cols-4 gap-5">
                     <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
                         <div>
                             <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Órdenes Activas</p>
-                            <h3 className="text-2xl font-bold text-slate-800 mt-1">{dashboard?.ordenesActivas ?? 1}</h3>
+                            <h3 className="text-2xl font-bold text-slate-800 mt-1">{dashboard?.ordenesActivas ?? ordenes.length}</h3>
                         </div>
                         <div className="p-3 bg-blue-50 text-blue-600 rounded-lg">
                             <Layers className="h-6 w-6" />
@@ -314,13 +379,13 @@ export default function App() {
                     </div>
                 </section>
 
-                {/* Panel de Costeo con Selector Dinámico */}
+                {/* Panel de Costeo Técnico */}
                 <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                     <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-50/50">
                         <div className="flex flex-col md:flex-row md:items-center gap-3">
-              <span className="text-xs font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-md w-max">
-                Motor de Costeo Técnico
-              </span>
+                            <span className="text-xs font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-md w-max">
+                                Motor de Costeo Técnico
+                            </span>
 
                             <div className="flex items-center gap-2">
                                 <select
@@ -412,7 +477,74 @@ export default function App() {
                     </div>
                 </section>
 
-                {/* Sección de Talleres Satélites */}
+                {/* Sección: Módulo de Órdenes de Producción (Corte y Lotes) */}
+                <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-5">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 pb-4">
+                        <div>
+                            <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                <ClipboardList className="h-5 w-5 text-indigo-600" />
+                                Órdenes de Producción y Control de Lotes
+                            </h2>
+                            <p className="text-sm text-slate-500">
+                                Control de unidades cortadas, asignación de referencias y seguimiento de manufactura.
+                            </p>
+                        </div>
+                        <button
+                            onClick={() => setModalOrdenAbierto(true)}
+                            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold transition active:scale-95 shadow-sm"
+                        >
+                            <Plus className="h-4 w-4" />
+                            Nueva Orden de Producción
+                        </button>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm text-slate-600">
+                            <thead className="bg-slate-50 text-xs uppercase font-bold text-slate-400 border-b border-slate-100">
+                            <tr>
+                                <th className="py-3 px-4">N° Orden</th>
+                                <th className="py-3 px-4">Referencia Prenda</th>
+                                <th className="py-3 px-4 text-center">Unidades Programadas</th>
+                                <th className="py-3 px-4 text-center">Lote Cortado</th>
+                                <th className="py-3 px-4 text-center">Fecha Inicio</th>
+                                <th className="py-3 px-4 text-center">Estado</th>
+                            </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                            {ordenes.length === 0 ? (
+                                <tr>
+                                    <td colSpan="6" className="py-6 text-center text-slate-400 italic">
+                                        No hay órdenes de producción registradas en este momento.
+                                    </td>
+                                </tr>
+                            ) : (
+                                ordenes.map((op) => (
+                                    <tr key={op.id} className="hover:bg-slate-50/60 transition">
+                                        <td className="py-3 px-4 font-bold text-slate-900">{op.numeroOrden}</td>
+                                        <td className="py-3 px-4 font-medium text-slate-700">
+                                            {op.fichaTecnica?.referencia || `Ficha #${op.fichaTecnicaId || '1'}`}
+                                        </td>
+                                        <td className="py-3 px-4 text-center font-semibold">{op.cantidadProgramada} uds</td>
+                                        <td className="py-3 px-4 text-center font-bold text-indigo-600">{op.cantidadCortada} uds</td>
+                                        <td className="py-3 px-4 text-center text-xs text-slate-500">{op.fechaInicio || '—'}</td>
+                                        <td className="py-3 px-4 text-center">
+                                                <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                                                    op.estado === 'FINALIZADA' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                                                        op.estado === 'EN_PROCESO' || op.estado === 'EN_CONFECCION' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
+                                                            'bg-amber-50 text-amber-700 border border-amber-200'
+                                                }`}>
+                                                    {op.estado}
+                                                </span>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                {/* Sección: Talleres Satélites */}
                 <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-6">
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 pb-4">
                         <div>
@@ -440,7 +572,7 @@ export default function App() {
                         </div>
                     )}
 
-                    {/* Formulario de Corte */}
+                    {/* Formulario Liquidación */}
                     <div className="grid grid-cols-1 md:grid-cols-5 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200/60">
                         <div>
                             <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Taller Satélite</label>
@@ -496,9 +628,9 @@ export default function App() {
                         <div className="border border-indigo-200 rounded-xl bg-indigo-50/40 p-6 space-y-4">
                             <div className="flex justify-between items-center border-b border-indigo-100 pb-3">
                                 <div>
-                  <span className="text-xs font-bold uppercase text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded">
-                    Cuenta de Cobro Aprobada
-                  </span>
+                                    <span className="text-xs font-bold uppercase text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded">
+                                        Cuenta de Cobro Aprobada
+                                    </span>
                                     <h3 className="text-base font-bold text-slate-800 mt-1">
                                         Liquidación #{comprobante.id} — {comprobante.satelite?.nombreTaller || 'Confecciones Doña Carmen'}
                                     </h3>
@@ -537,6 +669,138 @@ export default function App() {
                 </section>
 
             </main>
+
+            {/* Modal: Crear Nueva Orden de Producción */}
+            {modalOrdenAbierto && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden">
+                        <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                            <div>
+                                <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                                    <ClipboardList className="h-5 w-5 text-indigo-600" />
+                                    Nueva Orden de Producción
+                                </h3>
+                                <p className="text-xs text-slate-500">Lanzamiento de lote de corte y confección</p>
+                            </div>
+                            <button
+                                onClick={() => setModalOrdenAbierto(false)}
+                                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <form onSubmit={guardarOrdenProduccion} className="p-6 space-y-4">
+                            {modalOrdenError && (
+                                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
+                                    {modalOrdenError}
+                                </div>
+                            )}
+                            {modalOrdenExito && (
+                                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-xs">
+                                    {modalOrdenExito}
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">N° Orden</label>
+                                    <input
+                                        type="text"
+                                        value={formOrden.numeroOrden}
+                                        onChange={(e) => setFormOrden({ ...formOrden, numeroOrden: e.target.value })}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Referencia Prenda</label>
+                                    <select
+                                        value={formOrden.fichaTecnicaId}
+                                        onChange={(e) => setFormOrden({ ...formOrden, fichaTecnicaId: e.target.value })}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                    >
+                                        {fichas.map((f) => (
+                                            <option key={f.id} value={f.id}>
+                                                {f.referencia}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Unidades Programadas</label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        value={formOrden.cantidadProgramada}
+                                        onChange={(e) => setFormOrden({
+                                            ...formOrden,
+                                            cantidadProgramada: e.target.value,
+                                            cantidadCortada: e.target.value
+                                        })}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Unidades Cortadas</label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        value={formOrden.cantidadCortada}
+                                        onChange={(e) => setFormOrden({ ...formOrden, cantidadCortada: e.target.value })}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                        required
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Fecha de Inicio</label>
+                                    <input
+                                        type="date"
+                                        value={formOrden.fechaInicio}
+                                        onChange={(e) => setFormOrden({ ...formOrden, fechaInicio: e.target.value })}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Entrega Estimada (Opcional)</label>
+                                    <input
+                                        type="date"
+                                        value={formOrden.fechaEntregaEstimada}
+                                        onChange={(e) => setFormOrden({ ...formOrden, fechaEntregaEstimada: e.target.value })}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="pt-2 flex justify-end gap-3 border-t border-slate-100">
+                                <button
+                                    type="button"
+                                    onClick={() => setModalOrdenAbierto(false)}
+                                    className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={modalOrdenCargando}
+                                    className="px-5 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg flex items-center gap-2 shadow-sm transition disabled:opacity-50"
+                                >
+                                    {modalOrdenCargando && <Loader2 className="h-4 w-4 animate-spin" />}
+                                    {modalOrdenCargando ? 'Registrando...' : 'Lanzar Orden'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
 
             {/* Modal: Crear Nueva Ficha Técnica */}
             {modalFichaAbierto && (
@@ -607,7 +871,6 @@ export default function App() {
                                 />
                             </div>
 
-                            {/* Insumo Principal y Consumos */}
                             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
                                 <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Insumo Principal (Tela Base)</span>
                                 <div>
@@ -678,7 +941,7 @@ export default function App() {
                 </div>
             )}
 
-            {/* Modal: Entrega Satélite */}
+            {/* Modal: Entrega Satélite (Enlazado directamente a Orden de Producción) */}
             {modalAbierto && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
                     <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden">
@@ -720,20 +983,20 @@ export default function App() {
                                 </div>
 
                                 <div>
-                                    <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Referencia Prenda</label>
+                                    <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Orden de Producción</label>
                                     <select
-                                        value={formEntrega.fichaId}
-                                        onChange={(e) => setFormEntrega({ ...formEntrega, fichaId: e.target.value })}
+                                        value={formEntrega.ordenId}
+                                        onChange={(e) => setFormEntrega({ ...formEntrega, ordenId: e.target.value })}
                                         className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                                     >
-                                        {Array.isArray(fichas) && fichas.length > 0 ? (
-                                            fichas.map((f) => (
-                                                <option key={f.id} value={f.id}>
-                                                    {f.referencia}
+                                        {ordenes.length === 0 ? (
+                                            <option value="">No hay órdenes activas</option>
+                                        ) : (
+                                            ordenes.map((op) => (
+                                                <option key={op.id} value={op.id}>
+                                                    {op.numeroOrden} — {op.fichaTecnica?.referencia || `Ficha #${op.fichaTecnicaId || '1'}`} ({op.cantidadCortada} cortadas)
                                                 </option>
                                             ))
-                                        ) : (
-                                            <option value="1">JEAN-REF-001</option>
                                         )}
                                     </select>
                                 </div>
@@ -780,8 +1043,8 @@ export default function App() {
                                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 flex justify-between items-center text-xs">
                                     <span className="text-slate-600">Total a Pagar por Lote:</span>
                                     <span className="text-indigo-600 font-bold text-sm">
-                    ${(Number(formEntrega.cantidad) * Number(formEntrega.precioPorPrenda)).toLocaleString('es-CO')} COP
-                  </span>
+                                        ${(Number(formEntrega.cantidad) * Number(formEntrega.precioPorPrenda)).toLocaleString('es-CO')} COP
+                                    </span>
                                 </div>
                             )}
 
