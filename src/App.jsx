@@ -14,8 +14,7 @@ import {
     Check,
     Loader2,
     FileSpreadsheet,
-    ClipboardList,
-    Calendar
+    ClipboardList
 } from 'lucide-react';
 
 export default function App() {
@@ -59,7 +58,7 @@ export default function App() {
         fechaEntregaEstimada: ''
     });
 
-    // Modal: Entrega Satélite (Estado único y unificado)
+    // Modal: Entrega Satélite
     const [modalAbierto, setModalAbierto] = useState(false);
     const [modalCargando, setModalCargando] = useState(false);
     const [modalError, setModalError] = useState(null);
@@ -75,11 +74,37 @@ export default function App() {
     // Liquidación Satélite
     const [sateliteLiquidacionId, setSateliteLiquidacionId] = useState('1');
     const [fechaInicio, setFechaInicio] = useState('2026-11-01');
-    const [fechaFin, setFechaFin] = useState('2026-11-15');
+    const [fechaFin, setFechaFin] = useState('2026-11-30');
     const [retenciones, setRetenciones] = useState(0);
     const [liqCargando, setLiqCargando] = useState(false);
     const [liqError, setLiqError] = useState(null);
     const [comprobante, setComprobante] = useState(null);
+
+    // Talleres Satélites Dinámicos
+    const [satelites, setSatelites] = useState([]);
+    const [modalSateliteAbierto, setModalSateliteAbierto] = useState(false);
+    const [modalSateliteCargando, setModalSateliteCargando] = useState(false);
+    const [modalSateliteError, setModalSateliteError] = useState(null);
+    const [modalSateliteExito, setModalSateliteExito] = useState(null);
+    const [formSatelite, setFormSatelite] = useState({
+        nombreTaller: '',
+        nombreEncargado: '',
+        nitOIdentificacion: '',
+        telefono: '',
+        especialidad: 'Confección General'
+    });
+
+    // Modal: Nuevo Insumo (Telas / Avíos)
+    const [modalInsumoAbierto, setModalInsumoAbierto] = useState(false);
+    const [modalInsumoCargando, setModalInsumoCargando] = useState(false);
+    const [modalInsumoError, setModalInsumoError] = useState(null);
+    const [modalInsumoExito, setModalInsumoExito] = useState(null);
+    const [formInsumo, setFormInsumo] = useState({
+        nombre: '',
+        tipoInsumo: 'TELA',
+        unidadMedida: 'METROS',
+        costoUnitario: ''
+    });
 
     // Carga integral de datos
     const cargarTodo = async (idFichaActual = fichaSeleccionadaId, precio = precioVentaSimulado) => {
@@ -141,6 +166,20 @@ export default function App() {
                 }
             }
 
+            // 6. Talleres Satélites
+            try {
+                const resSatelites = await api.get(`/satelites/empresa/${empresaId}`);
+                if (Array.isArray(resSatelites.data)) {
+                    setSatelites(resSatelites.data);
+                    if (resSatelites.data.length > 0) {
+                        const primerId = String(resSatelites.data[0].id);
+                        setSateliteLiquidacionId(prev => prev || primerId);
+                        setFormEntrega(prev => ({ ...prev, sateliteId: prev.sateliteId || primerId }));
+                    }
+                }
+            } catch (e) {
+                console.warn("Aviso en Satélites:", e);
+            }
         } catch (err) {
             console.error("Error global de conexión:", err);
             setErrorBackend("No se pudo conectar con el servidor Spring Boot.");
@@ -280,6 +319,77 @@ export default function App() {
         }
     };
 
+    // Guardar Nuevo Taller Satélite
+    const guardarSatelite = async (e) => {
+        e.preventDefault();
+        setModalSateliteCargando(true);
+        setModalSateliteError(null);
+        setModalSateliteExito(null);
+
+        try {
+            const res = await api.post(`/satelites/empresa/${empresaId}`, formSatelite);
+            setModalSateliteExito(`¡Taller ${res.data.nombreTaller} registrado con éxito!`);
+            await cargarTodo();
+
+            const nuevoId = String(res.data.id);
+            setSateliteLiquidacionId(nuevoId);
+            setFormEntrega(prev => ({ ...prev, sateliteId: nuevoId }));
+
+            setTimeout(() => {
+                setModalSateliteExito(null);
+                setFormSatelite({
+                    nombreTaller: '',
+                    nombreEncargado: '',
+                    nitOIdentificacion: '',
+                    telefono: '',
+                    especialidad: 'Confección General'
+                });
+                setModalSateliteAbierto(false);
+            }, 1000);
+        } catch (err) {
+            setModalSateliteError(err.response?.data?.mensaje || "Error al registrar el taller satélite.");
+        } finally {
+            setModalSateliteCargando(false);
+        }
+    };
+
+    // Guardar Nuevo Insumo
+    const guardarInsumo = async (e) => {
+        e.preventDefault();
+        setModalInsumoCargando(true);
+        setModalInsumoError(null);
+        setModalInsumoExito(null);
+
+        const payload = {
+            nombre: formInsumo.nombre.trim(),
+            tipoInsumo: formInsumo.tipoInsumo,
+            unidadMedida: formInsumo.unidadMedida,
+            costoUnitario: Number(formInsumo.costoUnitario),
+            activo: true
+        };
+
+        try {
+            const res = await api.post(`/insumos/empresa/${empresaId}`, payload);
+            setModalInsumoExito(`¡Insumo "${res.data.nombre}" creado con éxito!`);
+            await cargarTodo();
+
+            setTimeout(() => {
+                setModalInsumoExito(null);
+                setFormInsumo({
+                    nombre: '',
+                    tipoInsumo: 'TELA',
+                    unidadMedida: 'METROS',
+                    costoUnitario: ''
+                });
+                setModalInsumoAbierto(false);
+            }, 1000);
+        } catch (err) {
+            setModalInsumoError(err.response?.data?.mensaje || "Error al registrar el insumo.");
+        } finally {
+            setModalInsumoCargando(false);
+        }
+    };
+
     // Liquidar período
     const liquidarPeriodo = async () => {
         setLiqCargando(true);
@@ -410,6 +520,13 @@ export default function App() {
                                 >
                                     <Plus className="h-3.5 w-3.5" /> Nueva Prenda
                                 </button>
+
+                                <button
+                                    onClick={() => setModalInsumoAbierto(true)}
+                                    className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-semibold border border-emerald-200 transition"
+                                >
+                                    <Plus className="h-3.5 w-3.5" /> Nuevo Insumo
+                                </button>
                             </div>
                         </div>
 
@@ -536,12 +653,12 @@ export default function App() {
                                             <td className="py-3 px-4 text-center font-bold text-indigo-600">{meta} uds</td>
                                             <td className="py-3 px-4 min-w-[180px]">
                                                 <div className="flex justify-between text-xs mb-1">
-                            <span className="font-semibold text-slate-700">
-                                {totalEntregado} / {meta} uds
-                            </span>
+                                                    <span className="font-semibold text-slate-700">
+                                                        {totalEntregado} / {meta} uds
+                                                    </span>
                                                     <span className={`font-bold ${estaFinalizada ? 'text-emerald-600' : 'text-indigo-600'}`}>
-                                {porcentaje}%
-                            </span>
+                                                        {porcentaje}%
+                                                    </span>
                                                 </div>
                                                 <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
                                                     <div
@@ -554,15 +671,15 @@ export default function App() {
                                             </td>
                                             <td className="py-3 px-4 text-center text-xs text-slate-500">{op.fechaInicio || '—'}</td>
                                             <td className="py-3 px-4 text-center">
-                        <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
-                            estaFinalizada
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : op.estado === 'EN_PROCESO' || op.estado === 'EN_CONFECCION'
-                                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                    : 'bg-amber-50 text-amber-700 border border-amber-200'
-                        }`}>
-                            {op.estado}
-                        </span>
+                                                <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                                                    estaFinalizada
+                                                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                                        : op.estado === 'EN_PROCESO' || op.estado === 'EN_CONFECCION'
+                                                            ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                                            : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                                }`}>
+                                                    {op.estado}
+                                                </span>
                                             </td>
                                         </tr>
                                     );
@@ -585,13 +702,22 @@ export default function App() {
                                 Liquidación consolidada sin sobrecostos de aportes patronales ni parafiscales.
                             </p>
                         </div>
-                        <button
-                            onClick={() => setModalAbierto(true)}
-                            className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-semibold transition active:scale-95"
-                        >
-                            <Plus className="h-4 w-4 text-indigo-400" />
-                            Nueva Entrega Satélite
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => setModalSateliteAbierto(true)}
+                                className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-sm font-semibold transition"
+                            >
+                                <Plus className="h-4 w-4" />
+                                Nuevo Satélite
+                            </button>
+                            <button
+                                onClick={() => setModalAbierto(true)}
+                                className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-semibold transition active:scale-95"
+                            >
+                                <Plus className="h-4 w-4 text-indigo-400" />
+                                Nueva Entrega Satélite
+                            </button>
+                        </div>
                     </div>
 
                     {liqError && (
@@ -610,7 +736,15 @@ export default function App() {
                                 onChange={(e) => setSateliteLiquidacionId(e.target.value)}
                                 className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white font-medium"
                             >
-                                <option value="1">Confecciones Doña Carmen</option>
+                                {satelites.length > 0 ? (
+                                    satelites.map((sat) => (
+                                        <option key={sat.id} value={sat.id}>
+                                            {sat.nombreTaller} {sat.nombreEncargado ? `(${sat.nombreEncargado})` : ''}
+                                        </option>
+                                    ))
+                                ) : (
+                                    <option value="1">Confecciones Doña Carmen</option>
+                                )}
                             </select>
                         </div>
                         <div>
@@ -970,7 +1104,7 @@ export default function App() {
                 </div>
             )}
 
-            {/* Modal: Entrega Satélite (Enlazado directamente a Orden de Producción) */}
+            {/* Modal: Entrega Satélite */}
             {modalAbierto && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
                     <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden">
@@ -1007,7 +1141,15 @@ export default function App() {
                                         onChange={(e) => setFormEntrega({ ...formEntrega, sateliteId: e.target.value })}
                                         className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                                     >
-                                        <option value="1">Confecciones Doña Carmen</option>
+                                        {satelites.length > 0 ? (
+                                            satelites.map((sat) => (
+                                                <option key={sat.id} value={sat.id}>
+                                                    {sat.nombreTaller} {sat.nombreEncargado ? `(${sat.nombreEncargado})` : ''}
+                                                </option>
+                                            ))
+                                        ) : (
+                                            <option value="1">Confecciones Doña Carmen</option>
+                                        )}
                                     </select>
                                 </div>
 
@@ -1103,6 +1245,227 @@ export default function App() {
                 </div>
             )}
 
+            {/* Modal: Crear Nuevo Taller Satélite */}
+            {modalSateliteAbierto && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden">
+                        <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                            <div>
+                                <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                                    <Truck className="h-5 w-5 text-indigo-600" />
+                                    Registrar Taller Satélite
+                                </h3>
+                                <p className="text-xs text-slate-500">Alta de taller externo de maquila y confección</p>
+                            </div>
+                            <button
+                                onClick={() => setModalSateliteAbierto(false)}
+                                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <form onSubmit={guardarSatelite} className="p-6 space-y-4">
+                            {modalSateliteError && (
+                                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
+                                    {modalSateliteError}
+                                </div>
+                            )}
+                            {modalSateliteExito && (
+                                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-xs">
+                                    {modalSateliteExito}
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Nombre del Taller</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Ej: Satélite El Costurero"
+                                        value={formSatelite.nombreTaller}
+                                        onChange={(e) => setFormSatelite({ ...formSatelite, nombreTaller: e.target.value })}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Encargado(a)</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Ej: Martha Lucía Pérez"
+                                        value={formSatelite.nombreEncargado}
+                                        onChange={(e) => setFormSatelite({ ...formSatelite, nombreEncargado: e.target.value })}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                        required
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">NIT o Cédula</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Ej: 1098654321"
+                                        value={formSatelite.nitOIdentificacion}
+                                        onChange={(e) => setFormSatelite({ ...formSatelite, nitOIdentificacion: e.target.value })}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Teléfono / WhatsApp</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Ej: 315 890 1234"
+                                        value={formSatelite.telefono}
+                                        onChange={(e) => setFormSatelite({ ...formSatelite, telefono: e.target.value })}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Especialidad de Confección</label>
+                                <input
+                                    type="text"
+                                    placeholder="Ej: Jeans, Camisería, Tejido de punto"
+                                    value={formSatelite.especialidad}
+                                    onChange={(e) => setFormSatelite({ ...formSatelite, especialidad: e.target.value })}
+                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                />
+                            </div>
+
+                            <div className="pt-2 flex justify-end gap-3 border-t border-slate-100">
+                                <button
+                                    type="button"
+                                    onClick={() => setModalSateliteAbierto(false)}
+                                    className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={modalSateliteCargando}
+                                    className="px-5 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg flex items-center gap-2 shadow-sm transition disabled:opacity-50"
+                                >
+                                    {modalSateliteCargando && <Loader2 className="h-4 w-4 animate-spin" />}
+                                    {modalSateliteCargando ? 'Guardando...' : 'Guardar Taller'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+            {/* Modal: Crear Nuevo Insumo */}
+            {modalInsumoAbierto && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden">
+                        <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                            <div>
+                                <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                                    <Layers className="h-5 w-5 text-emerald-600" />
+                                    Registrar Materia Prima / Insumo
+                                </h3>
+                                <p className="text-xs text-slate-500">Catálogo de telas, hilos y avíos para fichas técnicas</p>
+                            </div>
+                            <button
+                                onClick={() => setModalInsumoAbierto(false)}
+                                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <form onSubmit={guardarInsumo} className="p-6 space-y-4">
+                            {modalInsumoError && (
+                                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
+                                    {modalInsumoError}
+                                </div>
+                            )}
+                            {modalInsumoExito && (
+                                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-xs">
+                                    {modalInsumoExito}
+                                </div>
+                            )}
+
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Nombre del Insumo</label>
+                                <input
+                                    type="text"
+                                    placeholder="Ej: Tela Popelina Blanca o Hilo Calibre 120"
+                                    value={formInsumo.nombre}
+                                    onChange={(e) => setFormInsumo({ ...formInsumo, nombre: e.target.value })}
+                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                    required
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Categoría</label>
+                                    <select
+                                        value={formInsumo.tipoInsumo}
+                                        onChange={(e) => setFormInsumo({ ...formInsumo, tipoInsumo: e.target.value })}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                    >
+                                        <option value="TELA">Tela Base</option>
+                                        <option value="AVIO">Avío / Accesorio</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Unidad de Medida</label>
+                                    <select
+                                        value={formInsumo.unidadMedida}
+                                        onChange={(e) => setFormInsumo({ ...formInsumo, unidadMedida: e.target.value })}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                    >
+                                        <option value="METROS">Metros</option>
+                                        <option value="UNIDADES">Unidades</option>
+                                        <option value="CONOS">Conos</option>
+                                        <option value="KILOS">Kilos</option>
+                                        <option value="CENTIMETROS">Centímetros</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Costo Unitario ($ COP)</label>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    step="0.01"
+                                    placeholder="Ej: 16500"
+                                    value={formInsumo.costoUnitario}
+                                    onChange={(e) => setFormInsumo({ ...formInsumo, costoUnitario: e.target.value })}
+                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                    required
+                                />
+                            </div>
+
+                            <div className="pt-2 flex justify-end gap-3 border-t border-slate-100">
+                                <button
+                                    type="button"
+                                    onClick={() => setModalInsumoAbierto(false)}
+                                    className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={modalInsumoCargando}
+                                    className="px-5 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg flex items-center gap-2 shadow-sm transition disabled:opacity-50"
+                                >
+                                    {modalInsumoCargando && <Loader2 className="h-4 w-4 animate-spin" />}
+                                    {modalInsumoCargando ? 'Guardando...' : 'Guardar Insumo'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
