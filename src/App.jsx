@@ -504,8 +504,8 @@ export default function App() {
                             <tr>
                                 <th className="py-3 px-4">N° Orden</th>
                                 <th className="py-3 px-4">Referencia Prenda</th>
-                                <th className="py-3 px-4 text-center">Unidades Programadas</th>
                                 <th className="py-3 px-4 text-center">Lote Cortado</th>
+                                <th className="py-3 px-4">Avance Maquila</th>
                                 <th className="py-3 px-4 text-center">Fecha Inicio</th>
                                 <th className="py-3 px-4 text-center">Estado</th>
                             </tr>
@@ -518,26 +518,55 @@ export default function App() {
                                     </td>
                                 </tr>
                             ) : (
-                                ordenes.map((op) => (
-                                    <tr key={op.id} className="hover:bg-slate-50/60 transition">
-                                        <td className="py-3 px-4 font-bold text-slate-900">{op.numeroOrden}</td>
-                                        <td className="py-3 px-4 font-medium text-slate-700">
-                                            {op.fichaTecnica?.referencia || `Ficha #${op.fichaTecnicaId || '1'}`}
-                                        </td>
-                                        <td className="py-3 px-4 text-center font-semibold">{op.cantidadProgramada} uds</td>
-                                        <td className="py-3 px-4 text-center font-bold text-indigo-600">{op.cantidadCortada} uds</td>
-                                        <td className="py-3 px-4 text-center text-xs text-slate-500">{op.fechaInicio || '—'}</td>
-                                        <td className="py-3 px-4 text-center">
-                                                <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
-                                                    op.estado === 'FINALIZADA' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                                                        op.estado === 'EN_PROCESO' || op.estado === 'EN_CONFECCION' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
-                                                            'bg-amber-50 text-amber-700 border border-amber-200'
-                                                }`}>
-                                                    {op.estado}
-                                                </span>
-                                        </td>
-                                    </tr>
-                                ))
+                                ordenes.map((op) => {
+                                    const totalEntregado = (op.entregas || []).reduce(
+                                        (sum, ent) => sum + (ent.cantidadPrendas || 0),
+                                        0
+                                    );
+                                    const meta = op.cantidadCortada > 0 ? op.cantidadCortada : op.cantidadProgramada;
+                                    const porcentaje = meta > 0 ? Math.min(100, Math.round((totalEntregado / meta) * 100)) : 0;
+                                    const estaFinalizada = op.estado === 'FINALIZADA' || op.estado === 'TERMINADA' || porcentaje >= 100;
+
+                                    return (
+                                        <tr key={op.id} className="hover:bg-slate-50/60 transition">
+                                            <td className="py-3 px-4 font-bold text-slate-900">{op.numeroOrden}</td>
+                                            <td className="py-3 px-4 font-medium text-slate-700">
+                                                {op.fichaTecnica?.referencia || `Ficha #${op.fichaTecnicaId || '1'}`}
+                                            </td>
+                                            <td className="py-3 px-4 text-center font-bold text-indigo-600">{meta} uds</td>
+                                            <td className="py-3 px-4 min-w-[180px]">
+                                                <div className="flex justify-between text-xs mb-1">
+                            <span className="font-semibold text-slate-700">
+                                {totalEntregado} / {meta} uds
+                            </span>
+                                                    <span className={`font-bold ${estaFinalizada ? 'text-emerald-600' : 'text-indigo-600'}`}>
+                                {porcentaje}%
+                            </span>
+                                                </div>
+                                                <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                                                    <div
+                                                        className={`h-2 rounded-full transition-all duration-500 ${
+                                                            estaFinalizada ? 'bg-emerald-500' : 'bg-indigo-600'
+                                                        }`}
+                                                        style={{ width: `${porcentaje}%` }}
+                                                    />
+                                                </div>
+                                            </td>
+                                            <td className="py-3 px-4 text-center text-xs text-slate-500">{op.fechaInicio || '—'}</td>
+                                            <td className="py-3 px-4 text-center">
+                        <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                            estaFinalizada
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : op.estado === 'EN_PROCESO' || op.estado === 'EN_CONFECCION'
+                                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                    : 'bg-amber-50 text-amber-700 border border-amber-200'
+                        }`}>
+                            {op.estado}
+                        </span>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
                             )}
                             </tbody>
                         </table>
@@ -992,11 +1021,15 @@ export default function App() {
                                         {ordenes.length === 0 ? (
                                             <option value="">No hay órdenes activas</option>
                                         ) : (
-                                            ordenes.map((op) => (
-                                                <option key={op.id} value={op.id}>
-                                                    {op.numeroOrden} — {op.fichaTecnica?.referencia || `Ficha #${op.fichaTecnicaId || '1'}`} ({op.cantidadCortada} cortadas)
-                                                </option>
-                                            ))
+                                            ordenes.map((op) => {
+                                                const entregado = (op.entregas || []).reduce((acc, e) => acc + (e.cantidadPrendas || 0), 0);
+                                                const pendientes = Math.max(0, (op.cantidadCortada || op.cantidadProgramada) - entregado);
+                                                return (
+                                                    <option key={op.id} value={op.id} disabled={pendientes === 0}>
+                                                        {op.numeroOrden} — {op.fichaTecnica?.referencia || `Ficha #${op.fichaTecnicaId || '1'}`} ({pendientes} pendientes)
+                                                    </option>
+                                                );
+                                            })
                                         )}
                                     </select>
                                 </div>
