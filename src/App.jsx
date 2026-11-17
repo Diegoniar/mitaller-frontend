@@ -18,11 +18,24 @@ import {
     Users,
     UserPlus,
     LayoutDashboard,
-    Menu
+    Menu,
+    LogOut
 } from 'lucide-react';
+import AuthScreen from './components/AuthScreen';
 
 export default function App() {
-    const empresaId = 1;
+    const [sesion, setSesion] = useState(() => {
+        const guardada = localStorage.getItem('mitaller_sesion');
+        return guardada ? JSON.parse(guardada) : null;
+    });
+
+    const empresaId = sesion?.empresaId;
+
+    const cerrarSesion = () => {
+        localStorage.removeItem('mitaller_token');
+        localStorage.removeItem('mitaller_sesion');
+        setSesion(null);
+    };
 
     // Navegación por módulos (Sidebar)
     const [vistaActiva, setVistaActiva] = useState('resumen');
@@ -253,8 +266,10 @@ export default function App() {
     };
 
     useEffect(() => {
-        cargarTodo(1, 45000);
-    }, []);
+        if (empresaId) {
+            cargarTodo(null, 45000);
+        }
+    }, [empresaId]);
 
     const handleCambiarFicha = (id) => {
         const numId = Number(id);
@@ -587,6 +602,10 @@ export default function App() {
 
     const mostrarSeccion = (seccion) => vistaActiva === 'resumen' || vistaActiva === seccion;
 
+    if (!sesion) {
+        return <AuthScreen onLoginSuccess={(datos) => setSesion(datos)} />;
+    }
+
     return (
         <div className="min-h-screen bg-slate-100 flex font-sans text-slate-800">
 
@@ -623,9 +642,17 @@ export default function App() {
                     })}
                 </div>
 
-                <div className="p-4 border-t border-slate-800 text-xs text-slate-400 space-y-1">
-                    <p className="font-semibold text-slate-200">Confecciones El Búcaro</p>
-                    <p>Planta Principal • Barrancabermeja</p>
+                <div className="p-4 border-t border-slate-800 text-xs text-slate-400 space-y-2">
+                    <div>
+                        <p className="font-semibold text-slate-200">{sesion.razonSocial}</p>
+                        <p>{sesion.ciudad} • {sesion.nombreUsuario}</p>
+                    </div>
+                    <button
+                        onClick={cerrarSesion}
+                        className="w-full flex items-center justify-center gap-2 py-1.5 px-3 rounded-lg bg-slate-800 hover:bg-red-950/60 text-slate-300 hover:text-red-300 border border-slate-700 transition font-medium"
+                    >
+                        <LogOut className="h-3.5 w-3.5" /> Cerrar Sesión
+                    </button>
                 </div>
             </aside>
 
@@ -654,7 +681,7 @@ export default function App() {
                             <RefreshCw className="h-3.5 w-3.5" /> Sincronizar
                         </button>
                         <span className="hidden sm:inline-block text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1 rounded-full font-semibold">
-                            Confecciones El Búcaro
+                            {sesion.razonSocial}
                         </span>
                     </div>
                 </header>
