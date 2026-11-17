@@ -19,7 +19,8 @@ import {
     UserPlus,
     LayoutDashboard,
     Menu,
-    LogOut
+    LogOut,
+    Download
 } from 'lucide-react';
 import AuthScreen from './components/AuthScreen';
 
@@ -588,6 +589,25 @@ export default function App() {
         }
     };
 
+    // Descargar Reporte Contable en Excel (CSV)
+    const descargarReporte = async (tipo, nombreArchivo) => {
+        try {
+            const res = await api.get(`/reportes/${tipo}/empresa/${empresaId}`, {
+                responseType: 'blob'
+            });
+            const url = window.URL.createObjectURL(new Blob([res.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', nombreArchivo);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (err) {
+            alert("No se pudo generar el archivo de exportación.");
+        }
+    };
+
     const telasDisponibles = Array.isArray(insumosDisponibles)
         ? insumosDisponibles.filter(ins => ins && ins.tipoInsumo === 'TELA')
         : [];
@@ -764,6 +784,33 @@ export default function App() {
                             <div className="p-3 bg-amber-50 text-amber-600 rounded-lg">
                                 <AlertCircle className="h-6 w-6" />
                             </div>
+                        </div>
+                    </section>
+
+                    {/* Barra de Exportación Contable */}
+                    <section className="bg-white px-5 py-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-3 no-print">
+                        <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                            Exportación Contable (Excel / CSV):
+                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                onClick={() => descargarReporte('nomina', `Planilla_Nomina_${sesion.razonSocial}.csv`)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-semibold transition"
+                            >
+                                <Download className="h-3.5 w-3.5" /> Planilla Nómina
+                            </button>
+                            <button
+                                onClick={() => descargarReporte('satelites', `Maquila_Satelites_${sesion.razonSocial}.csv`)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-semibold transition"
+                            >
+                                <Download className="h-3.5 w-3.5" /> Liquidaciones Satélites
+                            </button>
+                            <button
+                                onClick={() => descargarReporte('fichas', `Catalogo_Prendas_${sesion.razonSocial}.csv`)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold transition"
+                            >
+                                <Download className="h-3.5 w-3.5" /> Catálogo Prendas
+                            </button>
                         </div>
                     </section>
 
