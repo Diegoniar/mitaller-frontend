@@ -20,7 +20,8 @@ import {
     LayoutDashboard,
     Menu,
     LogOut,
-    Download
+    Download,
+    Trash2
 } from 'lucide-react';
 import AuthScreen from './components/AuthScreen';
 
@@ -46,7 +47,7 @@ export default function App() {
     const [dashboard, setDashboard] = useState(null);
     const [fichas, setFichas] = useState([]);
     const [ordenes, setOrdenes] = useState([]);
-    const [fichaSeleccionadaId, setFichaSeleccionadaId] = useState(1);
+    const [fichaSeleccionadaId, setFichaSeleccionadaId] = useState(null);
     const [costoData, setCostoData] = useState(null);
     const [precioVentaSimulado, setPrecioVentaSimulado] = useState(45000);
     const [errorBackend, setErrorBackend] = useState(null);
@@ -178,10 +179,17 @@ export default function App() {
                 console.warn("Aviso en Dashboard:", e);
             }
 
+            let idFichaParaCosteo = idFichaActual;
+
             try {
                 const resFichas = await api.get(`/fichas/empresa/${empresaId}`);
                 if (Array.isArray(resFichas.data)) {
-                    setFichas(resFichas.data);
+                    const fichasActivas = resFichas.data.filter(f => f.activa !== false);
+                    setFichas(fichasActivas);
+                    if (!idFichaParaCosteo && fichasActivas.length > 0) {
+                        idFichaParaCosteo = fichasActivas[0].id;
+                        setFichaSeleccionadaId(idFichaParaCosteo);
+                    }
                 }
             } catch (e) {
                 console.warn("Aviso en Fichas:", e);
@@ -202,8 +210,9 @@ export default function App() {
             try {
                 const resInsumos = await api.get(`/insumos/empresa/${empresaId}`);
                 if (Array.isArray(resInsumos.data)) {
-                    setInsumosDisponibles(resInsumos.data);
-                    const tela = resInsumos.data.find(i => i.tipoInsumo === 'TELA') || resInsumos.data[0];
+                    const insumosActivos = resInsumos.data.filter(i => i.activo !== false);
+                    setInsumosDisponibles(insumosActivos);
+                    const tela = insumosActivos.find(i => i.tipoInsumo === 'TELA') || insumosActivos[0];
                     if (tela) {
                         setFormFicha(prev => ({ ...prev, insumoId: tela.id }));
                     }
@@ -212,23 +221,33 @@ export default function App() {
                 console.warn("Aviso en Insumos:", e);
             }
 
-            if (idFichaActual) {
+            if (idFichaParaCosteo) {
                 try {
-                    const resCosto = await api.get(`/fichas/${idFichaActual}/resumen-costos?precioVenta=${precio}`);
+                    const resCosto = await api.get(`/fichas/${idFichaParaCosteo}/resumen-costos?precioVenta=${precio}`);
                     setCostoData(resCosto.data);
                 } catch (e) {
                     console.warn("Aviso en Costos:", e);
                 }
+            } else {
+                setCostoData(null);
             }
 
             try {
                 const resSatelites = await api.get(`/satelites/empresa/${empresaId}`);
                 if (Array.isArray(resSatelites.data)) {
-                    setSatelites(resSatelites.data);
-                    if (resSatelites.data.length > 0) {
-                        const primerId = String(resSatelites.data[0].id);
-                        setSateliteLiquidacionId(prev => prev || primerId);
-                        setFormEntrega(prev => ({ ...prev, sateliteId: prev.sateliteId || primerId }));
+                    const satelitesActivos = resSatelites.data.filter(s => s.activo !== false);
+                    setSatelites(satelitesActivos);
+                    if (satelitesActivos.length > 0) {
+                        const primerId = String(satelitesActivos[0].id);
+                        setSateliteLiquidacionId(prev =>
+                            satelitesActivos.some(s => String(s.id) === String(prev)) ? prev : primerId
+                        );
+                        setFormEntrega(prev => ({
+                            ...prev,
+                            sateliteId: satelitesActivos.some(s => String(s.id) === String(prev.sateliteId))
+                                ? prev.sateliteId
+                                : primerId
+                        }));
                     }
                 }
             } catch (e) {
@@ -238,11 +257,19 @@ export default function App() {
             try {
                 const resEmp = await api.get(`/empleados/taller/${empresaId}`);
                 if (Array.isArray(resEmp.data)) {
-                    setEmpleados(resEmp.data);
-                    if (resEmp.data.length > 0) {
-                        const primerEmpId = String(resEmp.data[0].id);
-                        setEmpleadoNominaId(prev => prev || primerEmpId);
-                        setFormDestajo(prev => ({ ...prev, empleadoId: prev.empleadoId || primerEmpId }));
+                    const empleadosActivos = resEmp.data.filter(emp => emp.activo !== false);
+                    setEmpleados(empleadosActivos);
+                    if (empleadosActivos.length > 0) {
+                        const primerEmpId = String(empleadosActivos[0].id);
+                        setEmpleadoNominaId(prev =>
+                            empleadosActivos.some(e => String(e.id) === String(prev)) ? prev : primerEmpId
+                        );
+                        setFormDestajo(prev => ({
+                            ...prev,
+                            empleadoId: empleadosActivos.some(e => String(e.id) === String(prev.empleadoId))
+                                ? prev.empleadoId
+                                : primerEmpId
+                        }));
                     }
                 }
             } catch (e) {
@@ -608,6 +635,17 @@ export default function App() {
         }
     };
 
+    // Archivar o desactivar registro
+    const eliminarRegistro = async (ruta, nombreElemento) => {
+        if (!window.confirm(`¿Deseas archivar o desactivar "${nombreElemento}"?`)) return;
+        try {
+            await api.delete(ruta);
+            await cargarTodo(null, precioVentaSimulado);
+        } catch (err) {
+            alert(err.response?.data?.mensaje || "No se pudo eliminar el registro.");
+        }
+    };
+
     const telasDisponibles = Array.isArray(insumosDisponibles)
         ? insumosDisponibles.filter(ins => ins && ins.tipoInsumo === 'TELA')
         : [];
@@ -740,7 +778,7 @@ export default function App() {
                         </div>
                     )}
 
-                    {/* Tarjetas KPI (Siempre visibles en Resumen o en la parte superior) */}
+                    {/* Tarjetas KPI */}
                     <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 no-print">
                         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
                             <div>
@@ -824,7 +862,7 @@ export default function App() {
                                     </span>
 
                                     <select
-                                        value={fichaSeleccionadaId}
+                                        value={fichaSeleccionadaId || ''}
                                         onChange={(e) => handleCambiarFicha(e.target.value)}
                                         className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                                     >
@@ -835,9 +873,22 @@ export default function App() {
                                                 </option>
                                             ))
                                         ) : (
-                                            <option value="1">JEAN-REF-001 (Pantalón)</option>
+                                            <option value="">Sin prendas registradas</option>
                                         )}
                                     </select>
+
+                                    {fichaSeleccionadaId && fichas.length > 0 && (
+                                        <button
+                                            onClick={() => {
+                                                const actual = fichas.find(f => String(f.id) === String(fichaSeleccionadaId));
+                                                eliminarRegistro(`/fichas/${fichaSeleccionadaId}`, actual?.referencia || 'Ficha seleccionada');
+                                            }}
+                                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg border border-slate-200 transition"
+                                            title="Archivar prenda seleccionada"
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </button>
+                                    )}
 
                                     <button
                                         onClick={() => setModalFichaAbierto(true)}
@@ -916,6 +967,30 @@ export default function App() {
                                     </div>
                                 </div>
                             </div>
+
+                            {/* Catálogo rápido de insumos activos */}
+                            {insumosDisponibles.length > 0 && (
+                                <div className="px-6 py-3 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center gap-2">
+                                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1">
+                                        Insumos activos:
+                                    </span>
+                                    {insumosDisponibles.map((ins) => (
+                                        <span
+                                            key={ins.id}
+                                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-white text-slate-700 border border-slate-200"
+                                        >
+                                            <span>{ins.nombre} (${Number(ins.costoUnitario).toLocaleString('es-CO')})</span>
+                                            <button
+                                                onClick={() => eliminarRegistro(`/insumos/${ins.id}`, ins.nombre)}
+                                                className="text-slate-400 hover:text-red-600 transition"
+                                                title="Desactivar insumo"
+                                            >
+                                                <Trash2 className="h-3 w-3" />
+                                            </button>
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
                         </section>
                     )}
 
@@ -1071,7 +1146,7 @@ export default function App() {
                                                 </option>
                                             ))
                                         ) : (
-                                            <option value="1">Confecciones Doña Carmen</option>
+                                            <option value="">Sin talleres satélites</option>
                                         )}
                                     </select>
                                 </div>
@@ -1105,7 +1180,7 @@ export default function App() {
                                 <div className="flex items-end">
                                     <button
                                         onClick={liquidarPeriodo}
-                                        disabled={liqCargando}
+                                        disabled={liqCargando || satelites.length === 0}
                                         className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold transition flex items-center justify-center gap-2 disabled:opacity-50"
                                     >
                                         {liqCargando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
@@ -1114,19 +1189,43 @@ export default function App() {
                                 </div>
                             </div>
 
+                            {/* Directorio rápido de satélites activos */}
+                            {satelites.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-2 no-print">
+                                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1">
+                                        Satélites activos:
+                                    </span>
+                                    {satelites.map((sat) => (
+                                        <span
+                                            key={sat.id}
+                                            className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs bg-slate-100 text-slate-700 border border-slate-200"
+                                        >
+                                            <strong>{sat.nombreTaller}</strong> ({sat.especialidad || 'Maquila'})
+                                            <button
+                                                onClick={() => eliminarRegistro(`/satelites/${sat.id}`, sat.nombreTaller)}
+                                                className="text-slate-400 hover:text-red-600 transition"
+                                                title="Desactivar taller satélite"
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                            </button>
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+
                             {/* Comprobante Emitido */}
                             {comprobante && (
                                 <div className="border border-indigo-200 rounded-xl bg-indigo-50/40 p-6 space-y-4 print-area">
                                     <div className="flex justify-between items-center border-b border-indigo-100 pb-3">
                                         <div>
                                             <span className="text-xs font-bold uppercase text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded">
-                                                Cuenta de Cobro Aprobada • Confecciones El Búcaro
+                                                Cuenta de Cobro Aprobada • {sesion.razonSocial}
                                             </span>
                                             <h3 className="text-base font-bold text-slate-800 mt-1">
-                                                Liquidación #{comprobante.id} — {comprobante.satelite?.nombreTaller || 'Confecciones Doña Carmen'}
+                                                Liquidación #{comprobante.id} — {comprobante.satelite?.nombreTaller}
                                             </h3>
                                             <p className="text-xs text-slate-500">
-                                                Encargada: {comprobante.satelite?.nombreEncargado || 'Carmen Rosa Gomez'} | CC/NIT: {comprobante.satelite?.nitOIdentificacion || '60234567'}
+                                                Encargado(a): {comprobante.satelite?.nombreEncargado} | CC/NIT: {comprobante.satelite?.nitOIdentificacion}
                                             </p>
                                         </div>
                                         <button
@@ -1247,6 +1346,30 @@ export default function App() {
                                     </button>
                                 </div>
                             </div>
+
+                            {/* Listado rápido de personal activo en Nómina */}
+                            {empleados.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-2 no-print">
+                                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1">
+                                        Personal activo:
+                                    </span>
+                                    {empleados.map((emp) => (
+                                        <span
+                                            key={emp.id}
+                                            className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs bg-slate-100 text-slate-700 border border-slate-200"
+                                        >
+                                            <strong>{emp.nombreCompleto}</strong> ({emp.especialidad || emp.tipoVinculacion})
+                                            <button
+                                                onClick={() => eliminarRegistro(`/empleados/${emp.id}`, emp.nombreCompleto)}
+                                                className="text-slate-400 hover:text-red-600 transition"
+                                                title="Retirar de nómina activa"
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                            </button>
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
 
                             {/* Colilla de Pago Detallada */}
                             {colillaPago && (
@@ -1488,7 +1611,7 @@ export default function App() {
                                                 </option>
                                             ))
                                         ) : (
-                                            <option value="2">Tela Denim Rigido 12oz ($14.000 / METROS)</option>
+                                            <option value="">Crea primero una tela en "Nuevo Insumo"</option>
                                         )}
                                     </select>
                                 </div>
@@ -1652,7 +1775,7 @@ export default function App() {
                                                 </option>
                                             ))
                                         ) : (
-                                            <option value="1">Confecciones Doña Carmen</option>
+                                            <option value="">Sin talleres satélites</option>
                                         )}
                                     </select>
                                 </div>
